@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable
 import numpy as np
 import torch.nn.functional as F
 import torchvision
@@ -7,20 +6,6 @@ from torchvision import transforms
 import torch.optim as optim
 from torch import nn
 import matplotlib.pyplot as plt
-
-
-class Normal(object):
-    def __init__(self, mu, sigma, log_sigma, v=None, r=None):
-        self.mu = mu
-        self.sigma = sigma  # either stdev diagonal itself, or stdev diagonal from decomposition
-        self.logsigma = log_sigma
-        dim = mu.get_shape()
-        if v is None:
-            v = torch.FloatTensor(*dim)
-        if r is None:
-            r = torch.FloatTensor(*dim)
-        self.v = v
-        self.r = r
 
 
 class Encoder(torch.nn.Module):
@@ -63,11 +48,12 @@ class VAE(torch.nn.Module):
         log_sigma = self._enc_log_sigma(h_enc)
         sigma = torch.exp(log_sigma)
         std_z = torch.from_numpy(np.random.normal(0, 1, size=sigma.size())).float()
+        std_z = std_z.cuda()
 
         self.z_mean = mu
         self.z_sigma = sigma
 
-        return mu + sigma * Variable(std_z, requires_grad=False)  # Reparameterization trick
+        return mu + sigma * std_z  # Reparameterization trick
 
     def forward(self, state):
         h_enc = self.encoder(state)
@@ -99,14 +85,17 @@ if __name__ == '__main__':
     decoder = Decoder(8, 100, input_dim)
     vae = VAE(encoder, decoder)
 
-    criterion = nn.MSELoss()
+    vae = vae.cuda()
+
+    criterion = nn.MSELoss(reduction='sum')
 
     optimizer = optim.Adam(vae.parameters(), lr=0.0001)
     l = None
-    for epoch in range(100):
+    for epoch in range(20):
         for i, data in enumerate(dataloader, 0):
             inputs, classes = data
-            inputs, classes = Variable(inputs.resize_(batch_size, input_dim)), Variable(classes)
+            inputs.resize_(batch_size, input_dim)
+            inputs = inputs.cuda()
             optimizer.zero_grad()
             dec = vae(inputs)
             ll = latent_loss(vae.z_mean, vae.z_sigma)
@@ -116,5 +105,9 @@ if __name__ == '__main__':
             l = loss.data.item()
         print(epoch, l)
 
-    plt.imshow(vae(inputs).data[0].numpy().reshape(28, 28), cmap='gray')
-    plt.show(block=True)
+        plt.imshow(vae(inputs).data[0].cpu().numpy().reshape(28, 28), cmap='gray')
+        plt.show(block=True)
+        plt.imshow(vae(inputs).data[1].cpu().numpy().reshape(28, 28), cmap='gray')
+        plt.show(block=True)
+        plt.imshow(vae(inputs).data[2].cpu().numpy().reshape(28, 28), cmap='gray')
+        plt.show(block=True)
